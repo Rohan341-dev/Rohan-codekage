@@ -10,9 +10,22 @@ const filterButtons = document.querySelectorAll('.filter-btn');
 const projectCards = document.querySelectorAll('.project-card');
 const skillItems = document.querySelectorAll('.skill-item');
 const timelineItems = document.querySelectorAll('.timeline-item');
+const contactFormConfig = window.contactFormConfig || {};
+const contactDeliveryConfig = {
+    recipientEmail: contactFormConfig.recipientEmail || 'r6461719@gmail.com',
+    recipientPhone: contactFormConfig.recipientPhone || '+9779706299586',
+    emailjs: {
+        publicKey: contactFormConfig.emailjs?.publicKey || '',
+        serviceId: contactFormConfig.emailjs?.serviceId || '',
+        templateId: contactFormConfig.emailjs?.templateId || ''
+    }
+};
+let isEmailJsInitialized = false;
 
 // Set current year in footer
-currentYear.textContent = new Date().getFullYear();
+if (currentYear) {
+    currentYear.textContent = new Date().getFullYear();
+}
 
 // Theme Toggle
 function initTheme() {
@@ -221,61 +234,174 @@ function initProjectFiltering() {
     });
 }
 
-// Form Validation
-function initFormValidation() {
-    function validateForm() {
-        let isValid = true;
-        
-        // Name validation
-        const nameInput = document.getElementById('name');
-        const nameError = document.getElementById('name-error');
-        if (nameInput.value.trim().length < 2) {
-            nameError.textContent = 'Name must be at least 2 characters';
-            isValid = false;
-        } else {
-            nameError.textContent = '';
-        }
-        
-        // Email validation
-        const emailInput = document.getElementById('email');
-        const emailError = document.getElementById('email-error');
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(emailInput.value.trim())) {
-            emailError.textContent = 'Please enter a valid email address';
-            isValid = false;
-        } else {
-            emailError.textContent = '';
-        }
-        
-        // Message validation
-        const messageInput = document.getElementById('message');
-        const messageError = document.getElementById('message-error');
-        if (messageInput.value.trim().length < 10) {
-            messageError.textContent = 'Message must be at least 10 characters';
-            isValid = false;
-        } else {
-            messageError.textContent = '';
-        }
-        
-        return isValid;
+// Contact Form
+function initContactForm() {
+    if (!contactForm) return;
+
+    const submitButton = contactForm.querySelector('.btn-submit');
+    const submitButtonText = submitButton?.querySelector('.btn-text');
+    const successMessage = document.getElementById('form-success');
+    const fieldValidators = {
+        name: (value) => (
+            value.trim().length >= 2 ? '' : 'Name must be at least 2 characters.'
+        ),
+        email: (value) => {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(value.trim()) ? '' : 'Please enter a valid email address.';
+        },
+        phone: (value) => {
+            if (!value.trim()) return '';
+            const digitCount = value.replace(/\D/g, '').length;
+            return digitCount >= 7 ? '' : 'Please enter a valid phone number.';
+        },
+        subject: (value) => (
+            value.trim().length >= 3 ? '' : 'Subject must be at least 3 characters.'
+        ),
+        message: (value) => (
+            value.trim().length >= 10 ? '' : 'Message must be at least 10 characters.'
+        )
+    };
+
+    function isConfiguredEmailJsValue(value) {
+        return Boolean(value) && !value.startsWith('YOUR_');
     }
-    
-    contactForm.addEventListener('submit', function(e) {
+
+    function canSendWithEmailJs() {
+        return Boolean(window.emailjs)
+            && isConfiguredEmailJsValue(contactDeliveryConfig.emailjs.publicKey)
+            && isConfiguredEmailJsValue(contactDeliveryConfig.emailjs.serviceId)
+            && isConfiguredEmailJsValue(contactDeliveryConfig.emailjs.templateId);
+    }
+
+    function setFormMessage(message, type = 'success') {
+        if (!successMessage) return;
+
+        successMessage.textContent = message;
+        successMessage.classList.toggle('is-visible', Boolean(message));
+        successMessage.classList.toggle('is-error', type === 'error');
+    }
+
+    function setFieldError(fieldName, message) {
+        const errorElement = document.getElementById(`${fieldName}-error`);
+        if (!errorElement) return;
+        errorElement.textContent = message;
+    }
+
+    function validateField(fieldName) {
+        const field = document.getElementById(fieldName);
+        if (!field || !fieldValidators[fieldName]) return true;
+
+        const message = fieldValidators[fieldName](field.value);
+        setFieldError(fieldName, message);
+        return !message;
+    }
+
+    function validateForm() {
+        return Object.keys(fieldValidators).every(validateField);
+    }
+
+    function setSubmitState(isSubmitting) {
+        if (!submitButton) return;
+
+        submitButton.disabled = isSubmitting;
+        submitButton.setAttribute('aria-busy', String(isSubmitting));
+
+        if (submitButtonText) {
+            submitButtonText.textContent = isSubmitting ? 'Sending...' : 'Send Message';
+        }
+    }
+
+    function getFormData() {
+        return {
+            name: document.getElementById('name')?.value.trim() || '',
+            email: document.getElementById('email')?.value.trim() || '',
+            phone: document.getElementById('phone')?.value.trim() || '',
+            subject: document.getElementById('subject')?.value.trim() || '',
+            message: document.getElementById('message')?.value.trim() || ''
+        };
+    }
+
+    function buildMailtoLink(formData) {
+        const subject = encodeURIComponent(`[Portfolio Contact] ${formData.subject}`);
+        const body = encodeURIComponent(
+            `Name: ${formData.name}\n`
+            + `Email: ${formData.email}\n`
+            + `Phone: ${formData.phone || 'Not provided'}\n\n`
+            + `${formData.message}`
+        );
+
+        return `mailto:${contactDeliveryConfig.recipientEmail}?subject=${subject}&body=${body}`;
+    }
+
+    async function sendWithEmailJs(formData) {
+        if (!canSendWithEmailJs()) return false;
+
+        if (!isEmailJsInitialized) {
+            window.emailjs.init({
+                publicKey: contactDeliveryConfig.emailjs.publicKey
+            });
+            isEmailJsInitialized = true;
+        }
+
+        await window.emailjs.send(
+            contactDeliveryConfig.emailjs.serviceId,
+            contactDeliveryConfig.emailjs.templateId,
+            {
+                from_name: formData.name,
+                reply_to: formData.email,
+                phone: formData.phone || 'Not provided',
+                subject: formData.subject,
+                message: formData.message,
+                to_email: contactDeliveryConfig.recipientEmail,
+                contact_number: `${Date.now()}`
+            }
+        );
+
+        return true;
+    }
+
+    Object.keys(fieldValidators).forEach((fieldName) => {
+        const field = document.getElementById(fieldName);
+        if (!field) return;
+
+        field.addEventListener('input', () => {
+            validateField(fieldName);
+            if (successMessage?.classList.contains('is-visible')) {
+                setFormMessage('');
+            }
+        });
+    });
+
+    contactForm.addEventListener('submit', async function(e) {
         e.preventDefault();
-        
-        if (validateForm()) {
-            // Show success message
-            const successMessage = document.getElementById('form-success');
-            successMessage.textContent = 'Message sent successfully! I\'ll get back to you soon.';
-            successMessage.style.color = '#2ed573';
-            
-            // Reset form
-            contactForm.reset();
-            
-            // Clear success message after 5 seconds
-            setTimeout(() => {
-                successMessage.textContent = '';
-            }, 5000);
+        setFormMessage('');
+
+        if (!validateForm()) {
+            setFormMessage('Please fix the highlighted fields and try again.', 'error');
+            return;
+        }
+
+        const formData = getFormData();
+        setSubmitState(true);
+
+        try {
+            const sentDirectly = await sendWithEmailJs(formData);
+
+            if (sentDirectly) {
+                setFormMessage('Message sent successfully. I will get back to you soon.');
+                contactForm.reset();
+                Object.keys(fieldValidators).forEach((fieldName) => setFieldError(fieldName, ''));
+                return;
+            }
+
+            window.location.href = buildMailtoLink(formData);
+            setFormMessage('Your email app is opening with the message pre-filled.');
+        } catch (error) {
+            console.error('Contact form delivery failed:', error);
+            window.location.href = buildMailtoLink(formData);
+            setFormMessage('Direct sending is unavailable right now. Your email app is opening instead.', 'error');
+        } finally {
+            setSubmitState(false);
         }
     });
 }
@@ -364,7 +490,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initStatsCounter();
     initExperienceViewToggle();
     initProjectFiltering();
-    initFormValidation();
+    initContactForm();
     initBackToTop();
     initTypingEffect();
     initImagePreloader();
